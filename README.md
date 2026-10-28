@@ -28,9 +28,9 @@ v1 missed the small puddle at POI 422. v2 catches it, at the cost of 2–3 false
 > | MLflow experiment | `EXPERIMENT` (cell *Setup and Data Loading*) | all | `/Users/jeffrey.pao@databricks.com/Leak Detection - POI Baseline Experiments` | A workspace path you own |
 > | Labeled source table | `SPLITS_TABLE` (cell *Setup and Data Loading*) | all | `stable_classic_wg38i9_catalog.westlake_gas_leakage_2.silver_liquid_leak_results_splits` | Westlake labeled results table |
 > | Image volume folder | `IMAGE_BASE_PATH` (cell *Setup and Data Loading*) | all | `/Volumes/stable_classic_wg38i9_catalog/westlake_gas_leakage_2/documents/OneDrive_1_10-13-2026/` | Westlake volume + folder |
-> | v2 cache folder | `CACHE` (cell *Setup and Data Loading*) | both v2 | `/Volumes/stable_classic_wg38i9_catalog/westlake_gas_leakage_2/documents/experiments_cache/stage1_v2/` | A writable volume folder (must match in both v2 notebooks) |
+> | Embedding cache folder | `CACHE` (cell *Setup and Data Loading*) | v2 | `/Volumes/stable_classic_wg38i9_catalog/westlake_gas_leakage_2/documents/experiments_cache/stage1_v2/` | A writable volume folder |
 > | Registered model | `MODEL_NAME` (cell *Define Model D Pyfunc, Log and Register as Champion*) | v1 stage 1 | `stable_classic_wg38i9_catalog.westlake_gas_leakage_2.leak_detection_model` | `<westlake_catalog>.<westlake_schema>.<model_name>` |
-> | LLM serving endpoints | `LLMS` widget | v2 stage 2 | `databricks-gemini-3-8-flash`, `databricks-claude-sonnet-5-5` | Endpoints available in Westlake's workspace |
+> | LLM serving endpoints | `LLMS` widget | v2 | `databricks-gemini-3-8-flash`, `databricks-claude-sonnet-5-5` | Endpoints available in Westlake's workspace |
 > | LLM serving endpoints | `LLMS` list (cell *LLM Client and Response Parsing*) | v1 stage 2 | `databricks-gemini-3-8-flash`, `databricks-claude-sonnet-5-5`, `databricks-claude-opus-4-7`, `databricks-gpt-6-1-sol` | Endpoints available in Westlake's workspace |
 >
 > The source table must also have the columns listed in [Input data](#input-data).
@@ -39,13 +39,12 @@ v1 missed the small puddle at POI 422. v2 catches it, at the cost of 2–3 false
 
 | File | What it is |
 |------|------------|
-| `notebooks/stage1_v2_aligned_experiments.py` | **v2 stage 1.** Camera alignment, E1 (same-spot comparison), E2 (new dark patch), ensemble F, plus the v1 baselines recomputed for comparison. Caches embeddings, scores and maps for stage 2 v2. |
-| `notebooks/stage2_v2_llm_verification.py` | **v2 stage 2.** LLM verification of F's alerts with zoomed, camera-aligned hotspot crops and a 3-call majority vote. |
+| `notebooks/leak_detection_v2.py` | **The v2 pipeline in one notebook.** Stage 1 runs camera alignment, E1 (same-spot comparison), E2 (new dark patch) and ensemble F, plus the v1 baselines recomputed for comparison. Stage 2 then runs LLM verification of F's alerts with zoomed, camera-aligned hotspot crops and a 3-call majority vote. |
 | `notebooks/poi_baseline_experiments.py` | v1 stage 1 (Models A–D), Databricks source format |
 | `notebooks/poi_baseline_experiments.ipynb` | v1 stage 1 in Jupyter format **with outputs** from the Oct 18, 2026 run, viewable on GitHub |
 | `notebooks/stage2_llm_verification.py` | v1 stage 2 (Model D + four LLMs) |
 
-These are exports of the workspace notebooks in `/Users/jeffrey.pao@databricks.com/` (`Leak Detection - Stage 1 v2 Aligned Experiments`, `Leak Detection - Stage 2 v2 LLM Verification`, `Leak Detection - POI Baseline Experiments (notebook)`, `Leak Detection - Stage 2 LLM Verification (notebook)`). All four log to the same MLflow experiment.
+These are exports of the workspace notebooks in `/Users/jeffrey.pao@databricks.com/` (`Leak Detection v2 - Change Detection + LLM Verification`, `Leak Detection - POI Baseline Experiments (notebook)`, `Leak Detection - Stage 2 LLM Verification (notebook)`). All three log to the same MLflow experiment.
 
 # How the v2 pipeline works
 
@@ -130,7 +129,7 @@ The alert threshold is the **90th percentile of F over normal (no-leak) photos o
 
 ## Step 6: build what the LLM sees
 
-For each stage 2 candidate (`stage2_v2_llm_verification.py`):
+For each stage 2 candidate:
 
 | Image | What it is |
 |---|---|
@@ -161,7 +160,11 @@ It also lists common false-alarm causes:
 
 The model must answer with JSON: `leak`, `change_type`, `confidence`, `evidence`. The exact prompts are logged to MLflow as `prompts.json`.
 
-**Why three calls with the same prompt:** LLM outputs aren't deterministic (the endpoint's default sampling is used), so the same request can flip on a borderline image. The candidate's verdict is the **majority of 3 identical calls**, and the agreement rate is logged per image. In this run every real leak got 3/3 "leak" votes from both LLMs. Gemini's single-call false alarms ranged 2–3 and Sonnet's were 2 (at 10%), so voting mostly makes results repeatable rather than changing them. **Fail-safe:** if a call errors after retries, it counts as a "leak" vote, so an outage never silently drops an alert.
+**Why three calls with the same prompt:** LLM outputs aren't deterministic (the endpoint's default sampling is used), so the same request can flip on a borderline image. The candidate's verdict is the **majority of 3 identical calls**, and the agreement rate is logged per image. The pipeline was run twice, on Oct 26 and Oct 27, with identical stage 1 results:
+- **Sonnet** was steady: every single call caught 6/6, with 2 false alarms at 10%.
+- **Gemini** varied more. In the second run, one single call missed a leak (per-call recall 5–6 of 6) and per-call false alarms ranged 2–4. **The 3-call vote still kept all 6 leaks.**
+
+So voting both stabilizes the false-alarm count and protects recall on borderline calls. **Fail-safe:** if a call errors after retries, it counts as a "leak" vote, so an outage never silently drops an alert.
 
 Calls go through Databricks Foundation Model APIs with the OpenAI-compatible client (`/serving-endpoints`), 8 in parallel.
 
@@ -216,8 +219,8 @@ Latency is per call, measured with 8 calls in parallel.
 | Photo | Flagged by | What it is | Likely fix |
 |---|---|---|---|
 | POI 412, 2026-09-11 | Both LLMs | A **dried residue ring** where the 09-08 puddle had been. The most-similar reference was from before the leak (09-08 04:01), so the stain looked new. | Also send the **most recent** dry photo as a second reference; it would already show the stain. |
-| POI 417, 2026-09-08 | Sonnet | A dark area on the floor next to a hose that had been moved | Review with Westlake operators; more labeled history at this spot |
-| POIs 398 and 400 | Gemini | New POIs with no history, judged from a single photo | Resolves as the robot builds 5+ dry photos of each POI |
+| POI 417, 2026-09-08 | Sonnet (both runs); Gemini (Oct 27 run) | A dark area on the floor next to a hose that had been moved | Review with Westlake operators; more labeled history at this spot |
+| POI 398 (both runs), POI 400 (Oct 26 run) | Gemini | New POIs with no history, judged from a single photo | Resolves as the robot builds 5+ dry photos of each POI |
 
 ## Caveats
 
@@ -230,13 +233,15 @@ Latency is per call, measured with 8 calls in parallel.
 
 Experiment: `/Users/jeffrey.pao@databricks.com/Leak Detection - POI Baseline Experiments`
 
-| Run | Run ID |
-|---|---|
-| Summary - Stage 1 v2 aligned experiments | `83565260569d4f878f13ad18508193ca` |
-| v2 F. Ensemble E1-896 + E2 | `89840de3ae4141ff85de63f558882746` |
-| **Stage 2 v2: F + Claude Sonnet 5.5 [10% budget]** | `d909479ea59b46159090fdd3dc11808d` |
-| Stage 2 v2: F + Gemini 3.8 Flash [10% budget] | `c07ab3163d0545d68397e255989fd487` |
-| Summary - Stage 2 v2 LLM verification (F) | `dde458cd8c8e40ffbc67f12a75c58fe4` |
+Run IDs from both runs: Oct 27 is the `leak_detection_v2.py` notebook, Oct 26 is the earlier two-notebook version of the same code.
+
+| Run | Oct 27 run ID | Oct 26 run ID |
+|---|---|---|
+| Summary - Stage 1 v2 aligned experiments | `9453b0646ec942d191c45408d3fb6553` | `83565260569d4f878f13ad18508193ca` |
+| v2 F. Ensemble E1-896 + E2 | `01441d53748f4153933726f58728dd9e` | `89840de3ae4141ff85de63f558882746` |
+| **Stage 2 v2: F + Claude Sonnet 5.5 [10% budget]** | `34b1a18e5e5c4b5d9e394965f57914a5` | `d909479ea59b46159090fdd3dc11808d` |
+| Stage 2 v2: F + Gemini 3.8 Flash [10% budget] | `591ea548a08b4906be4353c7cf78098f` | `c07ab3163d0545d68397e255989fd487` |
+| Summary - Stage 2 v2 LLM verification (F) | `8dec5e243153450d8eca7117db0366b0` | `dde458cd8c8e40ffbc67f12a75c58fe4` |
 
 Artifacts:
 - The stage 1 summary run logs `summary.json`, `per_leak_ranks.json` and `v2_heatmaps.png` (reference / E1 heatmap / E2 dark blob for every leak and the top false alarms).
@@ -248,17 +253,16 @@ The F model is **not yet registered** in Unity Catalog; `leak_detection_model` v
 
 1. Import the notebooks from `notebooks/` into a Databricks workspace.
 2. Update the names in the table at the top of this README.
-3. Use serverless or a cluster with internet access, so it can download `facebook/dinov2-small` from Hugging Face. The v2 notebooks were run as serverless jobs (environment version 4).
-4. **v2 stage 1** (`stage1_v2_aligned_experiments.py`): run all cells.
-   - The first run computes features and embeddings for every photo (about 21 minutes on serverless CPU, about 25 minutes end to end) and caches them in `CACHE`. Later runs reuse the cache and take a few minutes.
-   - It also writes the scores, E1 z-maps, E2 masks and camera shifts that stage 2 v2 needs.
-5. **v2 stage 2** (`stage2_v2_llm_verification.py`): run all cells after stage 1 v2. Widgets:
-   - `STAGE1_MODEL`: which stage 1 score to use (default `F. Ensemble E1-896 + E2`)
+3. Use serverless or a cluster with internet access, so it can download `facebook/dinov2-small` from Hugging Face. The v2 notebook was run as a serverless job (environment version 4).
+4. **v2** (`leak_detection_v2.py`): run all cells. Stage 1 runs first and stage 2 uses its results directly. Widgets:
+   - `STAGE1_MODEL`: which stage 1 score sends images to stage 2 (default `F. Ensemble E1-896 + E2`)
    - `LLMS`: comma-separated `Name=endpoint` pairs
    - `REPEATS`: calls per candidate (default 3)
 
-   It checks that the stage 1 cache matches the current image list and stops if it's stale.
-6. **v1 notebooks:** see the v1 sections below. v1 stage 1 ends with `dbutils.notebook.exit()` before its model registration cells, and v1 stage 2 recomputes Model D itself.
+   Runtime:
+   - The first run computes features and embeddings for every photo (about 21 minutes on serverless CPU) and caches them in `CACHE`. Later runs reuse the cache when the image list hasn't changed.
+   - Stage 2 makes `REPEATS` × candidates calls per LLM (63 at the 10% budget, 108 at 20%), 8 in parallel.
+5. **v1 notebooks:** see the v1 sections below. v1 stage 1 ends with `dbutils.notebook.exit()` before its model registration cells, and v1 stage 2 recomputes Model D itself.
 
 # v1 stage 1: change detection (Oct 18, 2026)
 
