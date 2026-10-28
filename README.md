@@ -17,7 +17,8 @@ v1 missed the small puddle at POI 422. v2 catches it, at the cost of 2–3 false
 - [How the v2 pipeline works](#how-the-v2-pipeline-works): the decision tree, then each step in detail
 - [v2 results](#v2-results): stage 1, stage 2, remaining false alarms, caveats
 - [Running the notebooks](#running-the-notebooks)
-- [v1 experiments](#v1-stage-1-change-detection-oct-18-2026): the earlier models (A–D) and LLM comparison, kept for history
+- [Crowning a champion and registering the model](#crowning-a-champion-and-registering-the-model)
+- [Earlier experiments (v1)](#earlier-experiments-v1): what was tried before v2, and why it fell short
 
 > [!IMPORTANT]
 > **Update these names before running in Westlake's environment.**
@@ -25,13 +26,12 @@ v1 missed the small puddle at POI 422. v2 catches it, at the cost of 2–3 false
 >
 > | What | Variable / location | Notebook(s) | Current (demo) value | Change to |
 > |------|---------------------|-------------|----------------------|-----------|
-> | MLflow experiment | `EXPERIMENT` (cell *Setup and Data Loading*) | all | `/Users/jeffrey.pao@databricks.com/Leak Detection - POI Baseline Experiments` | A workspace path you own |
-> | Labeled source table | `SPLITS_TABLE` (cell *Setup and Data Loading*) | all | `stable_classic_wg38i9_catalog.westlake_gas_leakage_2.silver_liquid_leak_results_splits` | Westlake labeled results table |
-> | Image volume folder | `IMAGE_BASE_PATH` (cell *Setup and Data Loading*) | all | `/Volumes/stable_classic_wg38i9_catalog/westlake_gas_leakage_2/documents/OneDrive_1_10-13-2026/` | Westlake volume + folder |
-> | Embedding cache folder | `CACHE` (cell *Setup and Data Loading*) | v2 | `/Volumes/stable_classic_wg38i9_catalog/westlake_gas_leakage_2/documents/experiments_cache/stage1_v2/` | A writable volume folder |
-> | Registered model | `MODEL_NAME` (cell *Define Model D Pyfunc, Log and Register as Champion*) | v1 stage 1 | `stable_classic_wg38i9_catalog.westlake_gas_leakage_2.leak_detection_model` | `<westlake_catalog>.<westlake_schema>.<model_name>` |
+> | MLflow experiment | `EXPERIMENT` (cell *Setup and Data Loading*; widget in the champion notebook) | both | `/Users/jeffrey.pao@databricks.com/Leak Detection - POI Baseline Experiments` | A workspace path you own |
+> | Labeled source table | `SPLITS_TABLE` (cell *Setup and Data Loading* / *Settings*) | both | `stable_classic_wg38i9_catalog.westlake_gas_leakage_2.silver_liquid_leak_results_splits` | Westlake labeled results table |
+> | Image volume folder | `IMAGE_BASE_PATH` (cell *Setup and Data Loading* / *Settings*) | both | `/Volumes/stable_classic_wg38i9_catalog/westlake_gas_leakage_2/documents/OneDrive_1_10-13-2026/` | Westlake volume + folder |
+> | Embedding cache folder | `CACHE` (cell *Setup and Data Loading* / *Settings*) | both | `/Volumes/stable_classic_wg38i9_catalog/westlake_gas_leakage_2/documents/experiments_cache/stage1_v2/` | A writable volume folder |
+> | Registered model | `MODEL_NAME` widget | champion | `stable_classic_wg38i9_catalog.westlake_gas_leakage_2.leak_detection_v2` | `<westlake_catalog>.<westlake_schema>.<model_name>` |
 > | LLM serving endpoints | `LLMS` widget | v2 | `databricks-gemini-3-8-flash`, `databricks-claude-sonnet-5-5` | Endpoints available in Westlake's workspace |
-> | LLM serving endpoints | `LLMS` list (cell *LLM Client and Response Parsing*) | v1 stage 2 | `databricks-gemini-3-8-flash`, `databricks-claude-sonnet-5-5`, `databricks-claude-opus-4-7`, `databricks-gpt-6-1-sol` | Endpoints available in Westlake's workspace |
 >
 > The source table must also have the columns listed in [Input data](#input-data).
 
@@ -40,11 +40,9 @@ v1 missed the small puddle at POI 422. v2 catches it, at the cost of 2–3 false
 | File | What it is |
 |------|------------|
 | `notebooks/leak_detection_v2.py` | **The v2 pipeline in one notebook.** Stage 1 runs camera alignment, E1 (same-spot comparison), E2 (new dark patch) and ensemble F, plus the v1 baselines recomputed for comparison. Stage 2 then runs LLM verification of F's alerts with zoomed, camera-aligned hotspot crops and a 3-call majority vote. |
-| `notebooks/poi_baseline_experiments.py` | v1 stage 1 (Models A–D), Databricks source format |
-| `notebooks/poi_baseline_experiments.ipynb` | v1 stage 1 in Jupyter format **with outputs** from the Oct 18, 2026 run, viewable on GitHub |
-| `notebooks/stage2_llm_verification.py` | v1 stage 2 (Model D + four LLMs) |
+| `notebooks/register_champion.py` | **Crown a champion.** Ranks every stage 2 configuration logged to MLflow, packages the winner as an MLflow model that runs the full decision tree on new photos, registers it in Unity Catalog and moves the `Champion` alias if it beats the current one. |
 
-These are exports of the workspace notebooks in `/Users/jeffrey.pao@databricks.com/` (`Leak Detection v2 - Change Detection + LLM Verification`, `Leak Detection - POI Baseline Experiments (notebook)`, `Leak Detection - Stage 2 LLM Verification (notebook)`). All three log to the same MLflow experiment.
+These are exports of the workspace notebooks `/Users/jeffrey.pao@databricks.com/Leak Detection v2 - Change Detection + LLM Verification` and `.../Leak Detection - Register Champion`. Both use the same MLflow experiment.
 
 # How the v2 pipeline works
 
@@ -247,7 +245,7 @@ Artifacts:
 - The stage 1 summary run logs `summary.json`, `per_leak_ranks.json` and `v2_heatmaps.png` (reference / E1 heatmap / E2 dark blob for every leak and the top false alarms).
 - Each stage 2 run logs `candidate_verdicts.json` (votes, agreement, change type, evidence per candidate) and `prompts.json`.
 
-The F model is **not yet registered** in Unity Catalog; `leak_detection_model` v3 (Model D) still holds the `Champion` alias. Packaging F as an MLflow pyfunc is the main open step. It would store each POI's reference descriptors and per-location `mu`/`sd` maps, so a new photo is scored without recomputing every pair.
+The v2 champion is registered as `stable_classic_wg38i9_catalog.westlake_gas_leakage_2.leak_detection_v2` (v1, alias `Champion`). See [Crowning a champion](#crowning-a-champion-and-registering-the-model).
 
 # Running the notebooks
 
@@ -262,68 +260,89 @@ The F model is **not yet registered** in Unity Catalog; `leak_detection_model` v
    Runtime:
    - The first run computes features and embeddings for every photo (about 21 minutes on serverless CPU) and caches them in `CACHE`. Later runs reuse the cache when the image list hasn't changed.
    - Stage 2 makes `REPEATS` × candidates calls per LLM (63 at the 10% budget, 108 at 20%), 8 in parallel.
-5. **v1 notebooks:** see the v1 sections below. v1 stage 1 ends with `dbutils.notebook.exit()` before its model registration cells, and v1 stage 2 recomputes Model D itself.
+5. **Champion** (`register_champion.py`): run all cells after `leak_detection_v2`. See [the next section](#crowning-a-champion-and-registering-the-model).
 
-# v1 stage 1: change detection (Oct 18, 2026)
+# Crowning a champion and registering the model
 
-## Models compared
+`register_champion.py` turns the experiment results into a deployable model. Run it after `leak_detection_v2`.
 
-| Model | Idea | Needs leak examples to train? |
-|---|---|---|
-| Current production model | `leak_suspected` column from the table | — |
-| A. Absolute features + LR | 10 hand-crafted image features, logistic regression (prior best approach) | Yes |
-| B1. POI-relative feature anomaly | RMS of robust z-scores vs. this POI's normal images | **No** |
-| B2. POI-relative features + LR | Logistic regression on the POI-relative z-scores | Yes |
-| C1. DINOv2 global kNN | 1 − cosine similarity of the DINOv2 CLS embedding to the nearest normal image of the same POI | **No** |
-| C2. DINOv2 PatchCore-lite | Patch-level nearest-neighbor distance to the POI's normal patch bank (also shows *where* the change is) | **No** |
-| D. Ensemble B1 + C2 | Average percentile rank of B1 and C2 | **No** |
+## 1. Leaderboard
 
-### Evaluation protocol
+It collects every `Stage 2 v2:` run in the MLflow experiment and groups repeated runs of the same configuration (stage 1 model × LLM × budget × votes). It then ranks them with the selection rule from the Westlake deck:
 
-- 156 images with a matching file in the volume: 6 leaks, 150 normal, 13 POIs, 12 days.
-- **Leave-one-day-out**: each image is scored using only images from *other days*, so images of the same leak event never inform each other.
-- POI reference = labeled-normal images of the same POI from other days (minimum 5). If there are fewer, it falls back to normal images from all POIs (4 images, at POIs 358, 398, 399 and 400).
-- Primary metrics: **false alarms needed to catch k of 6 leaks**, and leaks caught under a fixed false-alarm budget (5% / 10% of normal images). Budget thresholds come from normal-image score percentiles only. No thresholds are tuned on leak images.
+1. **Clear the recall bar in every run.** The `MIN_RECALL` widget defaults to 1.0, meaning catch all 6 leaks.
+2. **Fewest false alarms:** the worst run first, then the average.
+3. **Lowest cost:** fewest LLM calls.
+4. **Lowest latency.**
 
-## Results (last run, Oct 18, 2026)
+Leaderboard from the Oct 28, 2026 run (2 evaluation runs per configuration):
 
-| Model | ROC-AUC | PR-AUC | FP to catch 6/6 | FP to catch 4/6 | Caught @ 5% budget | Caught @ 10% budget |
-|---|---|---|---|---|---|---|
-| Current production model | — | — | — | — | 3/6 (49 FP, binary alert) | 3/6 (49 FP, binary alert) |
-| A. Absolute features + LR | 0.374 | 0.072 | 149 | 147 | 1/6 (8 FP) | 1/6 (15 FP) |
-| B1. POI-relative feature anomaly | 0.799 | 0.163 | 106 | 22 | 1/6 (8 FP) | 3/6 (15 FP) |
-| B2. POI-relative features + LR | 0.310 | 0.049 | 148 | 148 | 0/6 (8 FP) | 1/6 (15 FP) |
-| C1. DINOv2 global kNN | 0.646 | 0.105 | 132 | 34 | 1/6 (8 FP) | 2/6 (15 FP) |
-| C2. DINOv2 PatchCore-lite | **0.853** | 0.165 | **68** | 16 | 1/6 (8 FP) | 3/6 (15 FP) |
-| **D. Ensemble B1 + C2** | 0.840 | **0.180** | 89 | **12** | **2/6 (8 FP)** | **4/6 (15 FP)** |
+| Rank | Configuration | Recall (worst run) | False alarms (worst run) | LLM calls per 156 photos | p50 latency |
+|---|---|---|---|---|---|
+| **1** | **F + Claude Sonnet 5.5, 10% budget** | **100%** | **2** | **63** | 3.0 s |
+| 2 | F + Claude Sonnet 5.5, 20% budget | 100% | 2 | 108 | 2.9 s |
+| 3 | F + Gemini 3.8 Flash, 10% budget | 100% | 3 | 63 | 3.0 s |
+| 4 | F + Gemini 3.8 Flash, 20% budget | 100% | 3 | 108 | 2.8 s |
 
-**Takeaways**
-- Comparing against each POI's own history works much better than absolute features. A and B2 (the supervised models) do worse than random with only 6 leaks to learn from.
-- Model D catches 4 of 6 leaks with 15 false alarms. The current production model catches 3 of 6 with 49.
-- The best models are fully unsupervised, so they don't depend on collecting more leak examples.
+## 2. Package the champion
 
-## Notebook walkthrough
+The winner is logged as an MLflow pyfunc (`LeakDetectionV2`) that runs the whole [decision tree](#the-decision-tree) on a new photo:
 
-| Cell | What it does |
-|------|--------------|
-| Install Dependencies | `mlflow scikit-learn scipy matplotlib pillow torch torchvision transformers` |
-| Setup and Data Loading | Loads the labeled table, keeps rows whose image exists in the volume, and derives `day`, `poi`, `y` and `current_alert` |
-| Reference Selection and Evaluation Helpers | `reference_idx()` (same-POI normals with fallback), `evaluate()`, and `log_model()` (logs to MLflow) |
-| Current Production Model Baseline | Scores the existing `leak_suspected` alert |
-| Feature Extraction | 10 features from the bottom 60% (floor area) of each image |
-| POI-Relative Feature Transform | Robust z-scores (median / MAD) vs. the POI's normal reference |
-| A, B1, B2 | Feature-based models |
-| DINOv2 Embeddings | `facebook/dinov2-small` CLS and patch tokens at ~448px |
-| C1, C2 | Embedding-based models. C2 also saves `patchcore_heatmaps.png` as an MLflow artifact |
-| D | Rank-average ensemble of B1 + C2 |
-| Comparison Summary | Side-by-side table, alerts per POI, and a summary MLflow run. **Ends with `dbutils.notebook.exit(...)`** |
-| Prepare Reference Artifacts for Model D | Pickles the per-POI normal features / embeddings / patches, C2 medians, historical scores, config, and DINOv2 weights |
-| Define Model D Pyfunc, Log and Register as Champion | `LeakDetectionEnsemble` MLflow pyfunc. Registers it to UC and sets the `Champion` alias |
+| | |
+|---|---|
+| **Input** | `image_path` (str), `poi_id` (int) |
+| **Param** | `verify` (bool, default `true`): run the stage 2 LLM check on stage 1 alerts |
+| **Output** | `no_history`, `e1_score`, `e2_score`, `stage1_score` (F), `stage1_alert`, `verified`, `leak` (final verdict), `leak_votes`, `n_votes`, `change_type`, `confidence`, `evidence`, `reference_file` |
 
-> [!NOTE]
-> The *Comparison Summary* cell calls `dbutils.notebook.exit()`, so **Run all** (or a job run) stops there and the last two registration cells don't run. To register Model D, run those two cells manually after the summary, as was done for the Oct 18 run.
+The model is self-contained (about 1.1 GB):
 
-## Input data
+| Artifact | What it holds |
+|---|---|
+| `bank/poi_<id>.npz` | For each POI with 5+ dry photos: their DINOv2 patch grids, L\* images, CLS embeddings, and the per-location `mu`/`sd` normalizers for E1 |
+| `bank/refs/` | 1920-px JPEGs of the dry photos, used only for the LLM's reference views and zoomed crops |
+| `historical.npz` | The evaluation's E1 and E2 score distributions, so F is computed on exactly the same scale |
+| `config.json` | Alert threshold (the 90th percentile of normal-photo F), LLM endpoint, votes, crop and E2 settings |
+| `dino_model/` | `facebook/dinov2-small` weights, so serving needs no Hugging Face download |
+
+**Checks against the evaluation:**
+- The notebook rebuilds F for every evaluation photo from the stored distributions and asserts it matches the logged scores exactly.
+- The alert threshold is the same one the evaluation used.
+
+**Production differences:**
+- New photos are compared with *all* dry photos of their POI known at registration. Evaluation held out same-day photos.
+- POIs without a bank always go to the LLM.
+- Re-run the notebook to refresh the bank as more photos are labeled.
+
+LLM calls use `databricks-sdk` (`WorkspaceClient().serving_endpoints.get_open_ai_client()`), so they authenticate with the notebook's, job's or serving endpoint's own credentials. If a call fails after retries, the vote counts as "leak", so alerts fail safe.
+
+## 3. Register and crown
+
+- **Register:** the model is registered to `MODEL_NAME` in Unity Catalog. Each version is tagged with its crown metrics (worst-case recall and false alarms, mean false alarms, LLM calls) and its source runs.
+- **Crown:** the `Champion` alias moves to the new version only if it ties or beats the current Champion under the same ranking rule. Set `PROMOTE=false` to register without moving the alias.
+- **Default model name:** `leak_detection_v2`. This is a separate model from v1's `leak_detection_model` (Model D), because the inputs and outputs differ.
+
+## 4. Smoke test
+
+The notebook reloads the model through `models:/<MODEL_NAME>@Champion` and scores 12 photos with the LLM check on: all 6 leaks, the two evaluation false alarms, a no-history POI and 3 random dry photos.
+
+On Oct 28, 2026:
+- **Leaks:** all 6 were flagged by stage 1 and confirmed by the LLM, each with 3/3 votes.
+- **No-history photo (POI 398):** sent to the LLM, which rejected it as an old stain.
+- **Runtime:** the whole notebook (leaderboard, reference bank, logging and registration, smoke test) ran in 9 minutes as a serverless job.
+
+The dry photos in this test are part of the reference bank, so their low scores are expected. **This test checks the plumbing, not accuracy.** Accuracy comes from the leave-one-day-out evaluation above.
+
+## Using the champion
+
+```python
+import mlflow, pandas as pd
+mlflow.set_registry_uri("databricks-uc")
+model = mlflow.pyfunc.load_model("models:/stable_classic_wg38i9_catalog.westlake_gas_leakage_2.leak_detection_v2@Champion")
+alerts = model.predict(pd.DataFrame({"image_path": ["/Volumes/.../new_photo.jpg"], "poi_id": [422]}),
+                       params={"verify": True})
+```
+
+# Input data
 
 The source table (`SPLITS_TABLE`) needs these columns:
 
@@ -334,56 +353,38 @@ The source table (`SPLITS_TABLE`) needs these columns:
 | `created_on_date_time` | Day used for leave-one-day-out splits |
 | `leaked` | Ground truth (`1.0` = leak) |
 | `leak_suspected` | Current production alert (`"Yes"` / other) |
-| `split` | Shown in the leak preview table |
 
-## Registered model (Model D)
+# Earlier experiments (v1)
 
-- **Input:** DataFrame with `image_path` (str) and `poi_id` (int)
-- **Output:** `anomaly_score` (0–1, average percentile rank), `b1_score`, `c2_score`, `b1_rank`, `c2_rank`
-- POIs with fewer than 5 normal reference images fall back to the pooled reference from all POIs.
+Before v1, five experiments (Oct 2026) tried to find leaks in single photos with vision LLMs, few-shot prompts, Westlake's own inspection rules and prompt, and hand-built image features with a classifier. The lesson was that **context beats model size**: no model could tell a new leak from a permanent stain in a single photo. That led to v1, the first two-stage design (experiments 6 and 7 in the Westlake deck).
 
-In the demo workspace, this notebook produced **v2** of `leak_detection_model` (MLflow run `db63beefecbf48ca8eabaedfef3285a0`). That version has since been **superseded by v3** (run `f2cc26eac4fe4b1293c15e54eb13a8fe`), which was built from v2's artifacts by a separate notebook, `Leak Detection - Register Model D v3`, and now holds the `Champion` alias.
+**v1 stage 1** compared each photo to its POI's normal history (Oct 18, 2026, same leave-one-day-out protocol):
 
-# v1 stage 2: AI verification (Oct 16, 2026)
+| Model | Idea | ROC-AUC | Caught @10% budget (15 FP) |
+|---|---|---|---|
+| A. Absolute features + logistic regression | 10 floor features, trained on the 6 leaks | 0.374 | 1/6 |
+| B1. POI-relative feature anomaly | Robust z-scores of those features vs. the POI's dry photos | 0.799 | 3/6 |
+| B2. B1 + logistic regression | B1's comparison, trained on the 6 leaks | 0.310 | 1/6 |
+| C1. DINOv2 global kNN | Whole-image embedding distance to the nearest dry photo | 0.646 | 2/6 |
+| C2. DINOv2 PatchCore-lite | Patch distance to an *unaligned* bank of dry-photo patches | 0.853 | 3/6 |
+| **D. B1 + C2** | Rank average | 0.840 | **4/6** |
 
-Stage 1 is tuned to catch as many leaks as possible, which means it also produces false alarms (new objects, lighting changes, camera shifts). Stage 2 sends each stage 1 alert to a vision LLM to remove them. **Stage 2 can only remove alerts, so its recall is capped by stage 1.**
+**v1 stage 2** sent Model D's alerts (20% budget) to four vision LLMs with a dry reference and a heatmap (Oct 16, 2026):
 
-### How it works
+| Verifier | Leaks caught | False alarms | F1 |
+|---|---|---|---|
+| **Gemini 3.8 Flash** | **5/6** | **0** | **0.91** |
+| Claude Sonnet 5.5 | 4/6 | 0 | 0.80 |
+| GPT-6.1 Sol | 4/6 | 1 | 0.73 |
+| Claude Opus 4.7 | 3/6 | 2 | 0.55 |
 
-1. **Stage 1 candidates:** the notebook recomputes Model D exactly as in the baseline notebook. Candidate sets come from normal-image score percentiles only (no tuning on leaks):
-   - **10% budget:** the threshold where 10% of normal images alert (stage 1: 4/6 leaks, 15 false alarms)
-   - **20% budget:** a wider net, so stage 2 has a chance to keep 5/6 leaks (stage 1: 5/6 leaks, 31 false alarms)
-2. **Reference image:** the most similar known-dry image of the same POI from a *different day*, chosen by DINOv2 CLS similarity. POIs with no history get no reference.
-3. **What the LLM sees:** the reference image, the current image, and the current image with the stage 1 change heatmap overlaid. Without a reference, it sees only the current image and the heatmap.
-4. **Prompt:** lists liquid leak indicators (a new wet or glossy patch, pooling, drips, a wet area below a flange or valve) and common false-alarm causes (new or moved objects, lighting and shadows, camera angle, old stains also visible in the reference, people). The model must return JSON: `leak`, `change_type`, `confidence`, `evidence`. The exact prompts are logged to MLflow as `prompts.json`.
-5. **Endpoints:** called through Databricks Foundation Model APIs using the OpenAI-compatible client (`/serving-endpoints`).
+**What v1 taught us**
+- Learn "normal", not "leak". With about 4 leak events, every model trained on the leaks (A, B2) did worse than random, while every unsupervised model held up.
+- A dry "before" photo is what lets an LLM reject lighting, objects and old stains.
+- Stage 2 can only remove alerts. v1's ceiling was the POI 422 puddle that Model D ranked 94th of 156, which [v2 fixes](#how-the-v2-pipeline-works).
 
-### Stage 2 results (Oct 16, 2026)
+The v1 notebooks were removed when v2 replaced them. They are preserved at [commit `7bb0cb7`](https://github.com/paojeffrey/westlake-leak-detection-experiments/tree/7bb0cb7/notebooks):
+- `poi_baseline_experiments.py` / `.ipynb`: Models A–D, with saved outputs, plus the Model D pyfunc
+- `stage2_llm_verification.py`: the four-LLM comparison
 
-Out of 156 images (6 leaks, 150 normal):
-
-| System | Budget | Leaks caught | False alarms | Precision | F1 | LLM calls | p50 latency |
-|---|---|---|---|---|---|---|---|
-| Current production model | — | 3/6 | 49 | 0.06 | 0.10 | — | — |
-| Stage 1 only (Model D) | 10% | 4/6 | 15 | 0.21 | 0.32 | 0 | — |
-| Stage 1 only (Model D) | 20% | 5/6 | 31 | 0.14 | 0.24 | 0 | — |
-| **D + Gemini 3.8 Flash** | **20%** | **5/6** | **0** | **1.00** | **0.909** | 36 | 2.7 s |
-| D + Gemini 3.8 Flash | 10% | 4/6 | 0 | 1.00 | 0.800 | 19 | 2.8 s |
-| D + Claude Sonnet 5.5 | 20% | 4/6 | 0 | 1.00 | 0.800 | 36 | 2.3 s |
-| D + Claude Sonnet 5.5 | 10% | 3/6 | 0 | 1.00 | 0.667 | 19 | 2.5 s |
-| D + GPT-6.1 Sol | 20% | 4/6 | 1 | 0.80 | 0.727 | 36 | 4.4 s |
-| D + GPT-6.1 Sol | 10% | 3/6 | 0 | 1.00 | 0.667 | 19 | 3.6 s |
-| D + Claude Opus 4.7 | 20% | 3/6 | 2 | 0.60 | 0.545 | 36 | 2.6 s |
-| D + Claude Opus 4.7 | 10% | 2/6 | 2 | 0.50 | 0.400 | 19 | 2.6 s |
-
-**Takeaways**
-- **Gemini 3.8 Flash removed all 31 stage 1 false alarms and kept all 5 leaks stage 1 caught.** The one missed leak was never flagged by stage 1.
-- Widening the stage 1 net from 10% to 20% only pays off with a verifier this accurate. Gemini turns the extra false alarms into an extra caught leak with no added noise.
-- Verification costs about 36 LLM calls (≈2.7 s each) per 156 images, because only stage 1 candidates are sent.
-- The Gemini 3.8 Flash 20% run (`0e8469945c044789adf1f26624f19b92`) is tagged as the experiment's `champion_run_id`. It also produced the `leak_alerts` table used by the [Leak Alert Review](https://github.com/paojeffrey/leak-alert-review) app.
-
-### MLflow artifacts per stage 2 run
-
-- `candidate_verdicts.json`: every candidate with its stage 1 score, reference file, LLM verdict, change type, confidence and evidence
-- `prompts.json`: the exact prompts, with and without a reference image
-- The summary run (`Summary - Stage 2 LLM verification`) logs `stage2_summary.json` (the table above) and `stage2_all_verdicts.json`
+Model D (`leak_detection_model` v3) still holds the `Champion` alias on that older registered model.
